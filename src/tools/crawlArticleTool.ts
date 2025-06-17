@@ -233,6 +233,43 @@ ${url}
 - 文章正文（通常在 #js_content 或 .rich_media_content 中）
 - 图片链接（data-src 属性）
 
+## 第六步：处理图片资源${save_images ? ' (已启用图片下载)' : ' (跳过图片下载)'}
+${save_images ? `
+**重要：需要下载所有图片并创建本地引用**
+
+1. **创建文件夹结构**：
+   - 创建文章文件夹（以文章标题命名，去除特殊字符）
+   - 在文章文件夹内创建 images 子文件夹
+
+2. **识别和下载图片**：
+   - 从HTML中找到所有 <img> 标签的 data-src 或 src 属性
+   - 对每个图片URL，使用 mcp_playwright_browser_navigate 访问图片链接
+   - 使用 mcp_playwright_browser_take_screenshot 或保存方式下载图片
+   - 图片命名：image_001.jpg, image_002.png 等（保持原格式）
+
+3. **更新markdown中的图片引用**：
+   - 将原始图片URL替换为本地路径：![图片描述](./images/image_001.jpg)
+   - 确保所有图片都能在本地正常显示
+` : '跳过图片下载（save_images=false）'}
+
+## 第七步：生成最终文件
+创建包含以下内容的markdown文件：
+\`\`\`markdown
+# [文章标题]
+
+**作者：** [公众号名称]  
+**发布时间：** [发布时间]  
+**原文链接：** ${url}
+
+---
+
+[文章正文内容${save_images ? '，图片使用本地路径引用' : ''}]
+
+---
+
+*抓取时间：[当前时间]*
+\`\`\`
+
 ## 处理配置：
 - 清理内容：${clean_content ? '是' : '否'}
 - 保存图片：${save_images ? '是' : '否'}  
@@ -240,7 +277,7 @@ ${url}
 - 抓取策略：${strategy}
 - 超时时间：${timeout}ms
 
-请按顺序执行这些步骤，并在每一步完成后告诉我结果。最后将提取的内容整理成${output_format}格式返回。
+请按顺序执行这些步骤，并在每一步完成后告诉我结果。${save_images ? '特别注意图片的下载和本地化处理！' : ''}
 `;
 
         return {
