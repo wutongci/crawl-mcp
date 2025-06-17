@@ -242,10 +242,13 @@ ${save_images ? `
    - 在文章文件夹内创建 images 子文件夹
 
 2. **识别和下载图片**：
-   - 从HTML中找到所有 <img> 标签的 data-src 或 src 属性
+   - 查找所有 <img> 标签，特别关注：
+     * src 属性（如：https://mmbiz.qpic.cn/sz_mmbiz_jpg/...）
+     * data-src 属性（微信懒加载图片）
+     * class 包含 "wx_follow_avatar_pic" 或其他微信图片类名
    - 对每个图片URL，使用 mcp_playwright_browser_navigate 访问图片链接
    - 使用 mcp_playwright_browser_take_screenshot 或保存方式下载图片
-   - 图片命名：image_001.jpg, image_002.png 等（保持原格式）
+   - 图片命名：image_001.jpg, image_002.png 等（从URL提取格式：wx_fmt=jpeg）
 
 3. **更新markdown中的图片引用**：
    - 将原始图片URL替换为本地路径：![图片描述](./images/image_001.jpg)
