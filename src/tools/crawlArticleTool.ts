@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MCPTool } from '../types';
+import { CallToolRequest, CallToolResult, TextContent } from '@modelcontextprotocol/sdk/types.js';
 
 /**
  * 单篇微信文章抓取工具定义
@@ -175,4 +176,87 @@ export function createErrorResult(
         error,
         warnings: partialResult?.warnings || []
     };
+}
+
+/**
+ * 抓取单篇微信文章工具
+ * 这个工具会返回操作指令，让Cursor的Agent调用playwright-mcp进行实际抓取
+ */
+export async function crawlWechatArticle(request: CallToolRequest): Promise<CallToolResult> {
+    try {
+        const { url, clean_content = true, save_images = true, output_format = 'markdown', strategy = 'basic', timeout = 30000 } = request.params as any;
+
+        if (!url) {
+            return {
+                content: [{
+                    type: "text",
+                    text: "错误：缺少必需的参数 'url'"
+                }],
+                isError: true
+            };
+        }
+
+        // 验证URL格式
+        if (!url.includes('mp.weixin.qq.com')) {
+            return {
+                content: [{
+                    type: "text", 
+                    text: "错误：URL必须是微信公众号文章链接（包含mp.weixin.qq.com）"
+                }],
+                isError: true
+            };
+        }
+
+        // 返回操作指令，让Cursor Agent去执行
+        const instructions = `
+我需要抓取这篇微信文章的内容。请按照以下步骤操作：
+
+## 第一步：打开浏览器并导航
+请使用 mcp_playwright_browser_navigate 工具导航到：
+${url}
+
+## 第二步：等待页面加载
+使用 mcp_playwright_browser_wait_for 工具等待3秒，确保页面完全加载。
+
+## 第三步：尝试展开全文
+使用 mcp_playwright_browser_snapshot 获取页面快照，然后查找"展开全文"或类似的按钮。
+如果找到，使用 mcp_playwright_browser_click 点击展开。
+
+## 第四步：获取页面内容
+使用 mcp_playwright_browser_snapshot 获取完整的页面HTML内容。
+
+## 第五步：提取文章信息
+从HTML中提取以下信息：
+- 文章标题（通常在 #activity-name 或 .rich_media_title 中）
+- 发布时间（通常在 #publish_time 中） 
+- 作者/公众号（通常在 .account_nickname_inner 中）
+- 文章正文（通常在 #js_content 或 .rich_media_content 中）
+- 图片链接（data-src 属性）
+
+## 处理配置：
+- 清理内容：${clean_content ? '是' : '否'}
+- 保存图片：${save_images ? '是' : '否'}  
+- 输出格式：${output_format}
+- 抓取策略：${strategy}
+- 超时时间：${timeout}ms
+
+请按顺序执行这些步骤，并在每一步完成后告诉我结果。最后将提取的内容整理成${output_format}格式返回。
+`;
+
+        return {
+            content: [{
+                type: "text",
+                text: instructions
+            }]
+        };
+
+    } catch (error) {
+        return {
+            content: [{
+                type: "text",
+                text: `抓取工具出错：${error instanceof Error ? error.message : String(error)}`
+            }],
+            isError: true
+        };
+    }
 } 
