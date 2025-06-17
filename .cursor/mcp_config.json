@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "crawl-mcp": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "cwd": "./",
+      "env": {
+        "MCP_DEBUG": "true",
+        "CRAWL_LOG_LEVEL": "info",
+        "CRAWL_OUTPUT_DIR": "./crawled_articles",
+        "CRAWL_MAX_CONCURRENT": "3",
+        "CRAWL_DEFAULT_TIMEOUT": "30000",
+        "CRAWL_RETRY_ATTEMPTS": "3"
+      }
+    }
+  }
+} 

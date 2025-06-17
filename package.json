@@ -1,0 +1,74 @@
+{
+  "name": "crawl-mcp-server",
+  "version": "1.0.1",
+  "description": "微信公众号文章抓取 MCP 服务器 - 通过编排调用 microsoft/playwright-mcp 实现智能抓取",
+  "main": "dist/index.js",
+  "bin": {
+    "crawl-mcp-server": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "test": "jest",
+    "test:unit": "jest --selectProjects unit",
+    "test:integration": "jest --selectProjects integration",
+    "test:e2e": "jest --selectProjects e2e",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/ --ext .ts",
+    "lint:fix": "eslint src/ --ext .ts --fix",
+    "clean": "rm -rf dist/",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.25.62",
+    "cheerio": "^1.0.0",
+    "turndown": "^7.1.2",
+    "mime-types": "^2.1.35",
+    "fs-extra": "^11.1.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/jest": "^29.5.0",
+    "@types/cheerio": "^0.22.31",
+    "@types/turndown": "^5.0.1",
+    "@types/fs-extra": "^11.0.1",
+    "@types/mime-types": "^2.1.1",
+    "@types/uuid": "^9.0.0",
+    "typescript": "^5.0.0",
+    "ts-node": "^10.9.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "eslint": "^8.42.0",
+    "@typescript-eslint/eslint-plugin": "^5.59.0",
+    "@typescript-eslint/parser": "^5.59.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "crawl",
+    "wechat",
+    "article",
+    "scraper",
+    "playwright",
+    "automation",
+    "cursor",
+    "ai-tools",
+    "content-extraction"
+  ],
+  "author": "coso<wutongc@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wutongci/crawl-mcp-server.git"
+  },
+  "homepage": "https://github.com/wutongci/crawl-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/wutongci/crawl-mcp-server/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
