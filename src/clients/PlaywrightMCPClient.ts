@@ -10,19 +10,13 @@ import {
     TypeOptions 
 } from '../types';
 import { Logger } from '../utils/Logger';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { spawn, ChildProcess } from 'child_process';
 
 /**
  * Playwright MCP 客户端
- * 调用Cursor中配置的@playwright/mcp服务
+ * 通过Cursor的MCP环境调用playwright工具
  */
 export class PlaywrightMCPClient {
     private logger: Logger;
-    private client: Client | null = null;
-    private transport: StdioClientTransport | null = null;
-    private playwrightProcess: ChildProcess | null = null;
     private isConnected: boolean = false;
 
     constructor() {
@@ -30,33 +24,20 @@ export class PlaywrightMCPClient {
     }
 
     /**
-     * 初始化MCP客户端，连接到playwright服务
+     * 初始化客户端
+     * 在Cursor环境中，playwright工具已经可用，无需额外初始化
      */
     async initialize(): Promise<void> {
         try {
             this.logger.info('初始化 Playwright MCP 客户端...');
             
-            // 启动playwright MCP服务进程
-            this.playwrightProcess = spawn('npx', ['@playwright/mcp@latest'], {
-                stdio: ['pipe', 'pipe', 'pipe'],
-                env: { ...process.env }
-            });
-
-            if (!this.playwrightProcess.stdout || !this.playwrightProcess.stdin) {
-                throw new Error('无法启动playwright MCP服务进程');
-            }
-
-            // 暂时使用模拟实现，避免复杂的MCP客户端配置
-            // TODO: 实现真正的MCP客户端连接
-            this.client = {} as any;
-            this.transport = {} as any;
-            
+            // 在Cursor MCP环境中，playwright工具应该已经可用
+            // 我们只需要标记为已连接
             this.isConnected = true;
-            this.logger.info('Playwright MCP 客户端连接成功');
+            this.logger.info('Playwright MCP 客户端初始化成功');
             
         } catch (error) {
-            this.logger.error('Playwright MCP 客户端连接失败', error);
-            await this.cleanup();
+            this.logger.error('Playwright MCP 客户端初始化失败', error);
             throw error;
         }
     }
@@ -65,13 +46,13 @@ export class PlaywrightMCPClient {
      * 检查连接状态
      */
     private ensureConnected(): void {
-        if (!this.isConnected || !this.client) {
-            throw new Error('Playwright MCP 客户端未连接，请先调用 initialize()');
+        if (!this.isConnected) {
+            throw new Error('Playwright MCP 客户端未初始化，请先调用 initialize()');
         }
     }
 
     /**
-     * 调用MCP工具
+     * 调用MCP工具 - 通过Cursor环境
      */
     private async callTool(toolName: string, args: any): Promise<PlaywrightResult> {
         this.ensureConnected();
@@ -79,77 +60,354 @@ export class PlaywrightMCPClient {
         try {
             this.logger.debug(`调用 Playwright MCP 工具: ${toolName}`, args);
             
-            // 暂时返回模拟结果，实际实现需要调用真正的playwright MCP
-            this.logger.debug(`模拟调用 Playwright MCP 工具: ${toolName}`, args);
+            // 在Cursor环境中，我们需要通过某种方式调用playwright工具
+            // 由于我们在MCP服务器内部，需要找到正确的调用方式
             
-            return await this.mockPlaywrightCall(toolName, args);
+            // 尝试通过process.env或global对象访问MCP工具
+            const result = await this.callCursorMCPTool(toolName, args);
+            
+            this.logger.debug(`工具调用成功: ${toolName}`, result);
+            return result;
             
         } catch (error) {
             this.logger.error(`工具调用失败: ${toolName}`, error);
+            
+            // 如果调用失败，使用fallback实现
+            return await this.fallbackImplementation(toolName, args);
+        }
+    }
+
+    /**
+     * 调用Cursor环境中的MCP工具
+     */
+    private async callCursorMCPTool(toolName: string, args: any): Promise<PlaywrightResult> {
+        // 这里是关键：我们需要找到正确的方式来调用Cursor中的playwright工具
+        
+        // 方法1: 尝试通过环境变量或全局对象
+        if (typeof (global as any).mcpTools !== 'undefined') {
+            const mcpTools = (global as any).mcpTools;
+            if (mcpTools.playwright && typeof mcpTools.playwright[toolName] === 'function') {
+                const result = await mcpTools.playwright[toolName](args);
+                return {
+                    success: true,
+                    data: result,
+                    metadata: { timestamp: Date.now() }
+                };
+            }
+        }
+
+                 // 方法2: 尝试通过Node.js进程间通信
+         if (process.send && typeof process.send === 'function') {
+            return new Promise((resolve) => {
+                const requestId = `playwright_${Date.now()}_${Math.random()}`;
+                
+                const timeout = setTimeout(() => {
+                    resolve({
+                        success: false,
+                        error: '调用playwright工具超时'
+                    });
+                }, 30000);
+
+                const messageHandler = (message: any) => {
+                    if (message.requestId === requestId) {
+                        clearTimeout(timeout);
+                        process.off('message', messageHandler);
+                        resolve({
+                            success: message.success,
+                            data: message.data,
+                            error: message.error,
+                            metadata: message.metadata || {}
+                        });
+                    }
+                };
+
+                                 process.on('message', messageHandler);
+                 process.send!({
+                     type: 'mcp_tool_call',
+                     requestId,
+                     toolName,
+                     args
+                 });
+            });
+        }
+
+        // 方法3: 直接使用实际的playwright操作
+        return await this.directPlaywrightImplementation(toolName, args);
+    }
+
+    /**
+     * 直接实现playwright操作
+     */
+    private async directPlaywrightImplementation(toolName: string, args: any): Promise<PlaywrightResult> {
+        const { chromium } = require('playwright');
+        
+        try {
+            switch (toolName) {
+                case 'mcp_playwright_browser_navigate':
+                    return await this.handleNavigate(args.url);
+                    
+                case 'mcp_playwright_browser_snapshot':
+                    return await this.handleSnapshot();
+                    
+                case 'mcp_playwright_browser_wait_for':
+                    return await this.handleWaitFor(args);
+                    
+                case 'mcp_playwright_browser_click':
+                    return await this.handleClick(args);
+                    
+                default:
+                    throw new Error(`不支持的工具: ${toolName}`);
+            }
+        } catch (error) {
+            throw new Error(`Playwright操作失败: ${error instanceof Error ? error.message : String(error)}`);
+        }
+    }
+
+    /**
+     * 处理页面导航
+     */
+    private async handleNavigate(url: string): Promise<PlaywrightResult> {
+        const { chromium } = require('playwright');
+        
+        let browser = null;
+        let context = null;
+        let page = null;
+        
+        try {
+            this.logger.info(`正在导航到: ${url}`);
+            
+            browser = await chromium.launch({
+                headless: true,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-blink-features=AutomationControlled',
+                    '--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                ]
+            });
+
+            context = await browser.newContext({
+                viewport: { width: 1920, height: 1080 },
+                userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                locale: 'zh-CN',
+                timezoneId: 'Asia/Shanghai'
+            });
+
+            // 添加反检测脚本
+            await context.addInitScript(`
+                delete window.navigator.webdriver;
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['zh-CN', 'zh', 'en-US', 'en']
+                });
+            `);
+
+            page = await context.newPage();
+            
+            // 导航到页面
+            await page.goto(url, { 
+                waitUntil: 'domcontentloaded', 
+                timeout: 30000 
+            });
+
+            // 等待页面稳定
+            await page.waitForTimeout(2000);
+
+            // 存储页面引用供后续使用
+            this.storeBrowserSession(browser, context, page);
+
+            return {
+                success: true,
+                data: { 
+                    url, 
+                    title: await page.title(),
+                    status: 'loaded' 
+                },
+                metadata: { 
+                    loadTime: Date.now(),
+                    viewport: await page.viewportSize()
+                }
+            };
+
+        } catch (error) {
+            // 清理资源
+            if (page) await page.close().catch(() => {});
+            if (context) await context.close().catch(() => {});
+            if (browser) await browser.close().catch(() => {});
+
+            throw error;
+        }
+    }
+
+    /**
+     * 处理页面快照
+     */
+    private async handleSnapshot(): Promise<PlaywrightResult> {
+        const session = this.getBrowserSession();
+        if (!session || !session.page) {
             return {
                 success: false,
-                error: error instanceof Error ? error.message : String(error)
+                error: '没有活动的浏览器会话，请先导航到页面'
             };
         }
+
+        try {
+            // 尝试点击"展开全文"按钮
+            try {
+                const expandButtons = await session.page.$$('.rich_media_js:visible');
+                for (const button of expandButtons) {
+                    await button.click();
+                    await session.page.waitForTimeout(1000);
+                }
+            } catch (e) {
+                this.logger.debug('没有找到展开按钮或点击失败', e);
+            }
+
+            // 获取页面HTML内容
+            const content = await session.page.content();
+
+            return {
+                success: true,
+                data: content,
+                metadata: {
+                    timestamp: Date.now(),
+                    contentLength: content.length,
+                    url: session.page.url()
+                }
+            };
+
+        } catch (error) {
+            return {
+                success: false,
+                error: `获取页面快照失败: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
+    }
+
+    /**
+     * 处理等待操作
+     */
+    private async handleWaitFor(args: any): Promise<PlaywrightResult> {
+        const session = this.getBrowserSession();
+        if (!session || !session.page) {
+            return {
+                success: false,
+                error: '没有活动的浏览器会话'
+            };
+        }
+
+        try {
+            if (args.text) {
+                // 等待文本出现
+                await session.page.waitForSelector(`text=${args.text}`, {
+                    timeout: (args.time || 30) * 1000
+                });
+            } else {
+                // 简单等待
+                await session.page.waitForTimeout((args.time || 3) * 1000);
+            }
+
+            return {
+                success: true,
+                data: { waited: true },
+                metadata: { waitTime: args.time * 1000 }
+            };
+
+        } catch (error) {
+            return {
+                success: false,
+                error: `等待操作失败: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
+    }
+
+    /**
+     * 处理点击操作
+     */
+    private async handleClick(args: any): Promise<PlaywrightResult> {
+        const session = this.getBrowserSession();
+        if (!session || !session.page) {
+            return {
+                success: false,
+                error: '没有活动的浏览器会话'
+            };
+        }
+
+        try {
+            await session.page.click(args.element);
+            await session.page.waitForTimeout(1000);
+
+            return {
+                success: true,
+                data: { clicked: true, element: args.element },
+                metadata: { clickTime: Date.now() }
+            };
+
+        } catch (error) {
+            return {
+                success: false,
+                error: `点击操作失败: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
+    }
+
+    /**
+     * 存储浏览器会话
+     */
+    private storeBrowserSession(browser: any, context: any, page: any): void {
+        (global as any)._crawlMCPBrowserSession = { browser, context, page };
+    }
+
+    /**
+     * 获取浏览器会话
+     */
+    private getBrowserSession(): any {
+        return (global as any)._crawlMCPBrowserSession || null;
+    }
+
+    /**
+     * Fallback实现（如果无法调用真正的playwright）
+     */
+    private async fallbackImplementation(toolName: string, args: any): Promise<PlaywrightResult> {
+        this.logger.warn(`使用fallback实现: ${toolName}`);
+        
+        // 尝试直接调用实现
+        return await this.directPlaywrightImplementation(toolName, args);
     }
 
     /**
      * 页面导航
      */
     async navigate(url: string, options?: Partial<NavigateOptions>): Promise<PlaywrightResult> {
-        return this.callTool('mcp_playwright_browser_navigate', {
-            url
-        });
+        return this.callTool('mcp_playwright_browser_navigate', { url });
     }
 
     /**
      * 等待页面加载或元素出现
      */
     async waitFor(selector?: string, options?: Partial<WaitOptions>): Promise<PlaywrightResult> {
-        if (selector) {
-            return this.callTool('mcp_playwright_browser_wait_for', {
-                text: selector,
-                time: options?.timeout ? options.timeout / 1000 : 30
-            });
-        } else {
-            // 等待页面加载
-            return this.callTool('mcp_playwright_browser_wait_for', {
-                time: 3
-            });
-        }
+        return this.callTool('mcp_playwright_browser_wait_for', {
+            text: selector,
+            time: options?.timeout ? options.timeout / 1000 : 3
+        });
     }
 
     /**
      * 获取页面快照
      */
     async snapshot(options?: Partial<SnapshotOptions>): Promise<PlaywrightResult> {
-        return this.callTool('mcp_playwright_browser_snapshot', {
-            random_string: 'snapshot'
-        });
+        return this.callTool('mcp_playwright_browser_snapshot', {});
     }
 
     /**
      * 点击元素
      */
     async click(selector: string, options?: Partial<ClickOptions>): Promise<PlaywrightResult> {
-        // 首先获取页面快照来找到元素
-        const snapshotResult = await this.snapshot();
-        if (!snapshotResult.success) {
-            return snapshotResult;
-        }
-
-        // 解析快照找到匹配的元素引用
-        const elementRef = this.findElementInSnapshot(selector, snapshotResult.data);
-        if (!elementRef) {
-            return {
-                success: false,
-                error: `未找到选择器对应的元素: ${selector}`
-            };
-        }
-
         return this.callTool('mcp_playwright_browser_click', {
-            element: selector,
-            ref: elementRef
+            element: selector
         });
     }
 
@@ -157,166 +415,97 @@ export class PlaywrightMCPClient {
      * 截图
      */
     async takeScreenshot(options?: Partial<ScreenshotOptions>): Promise<PlaywrightResult> {
-        return this.callTool('mcp_playwright_browser_take_screenshot', {
-            filename: options?.path,
-            raw: options?.fullPage || false
-        });
+        const session = this.getBrowserSession();
+        if (!session || !session.page) {
+            return {
+                success: false,
+                error: '没有活动的浏览器会话'
+            };
+        }
+
+        try {
+            const screenshot = await session.page.screenshot({
+                fullPage: options?.fullPage || true,
+                type: 'png'
+            });
+
+            return {
+                success: true,
+                data: { 
+                    screenshot: screenshot.toString('base64'),
+                    filename: options?.path 
+                },
+                metadata: { 
+                    size: screenshot.length,
+                    timestamp: Date.now()
+                }
+            };
+
+        } catch (error) {
+            return {
+                success: false,
+                error: `截图失败: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
     }
 
     /**
      * 滚动页面
      */
     async scroll(options?: Partial<ScrollOptions>): Promise<PlaywrightResult> {
-        // Playwright MCP可能没有直接的滚动工具，使用JavaScript执行
-        const scrollScript = `window.scrollBy(${options?.x || 0}, ${options?.y || 500})`;
-        
-        // 这里可能需要通过其他方式实现滚动
-        return {
-            success: true,
-            data: { scrolled: true },
-            metadata: { x: options?.x || 0, y: options?.y || 500 }
-        };
+        const session = this.getBrowserSession();
+        if (!session || !session.page) {
+            return {
+                success: false,
+                error: '没有活动的浏览器会话'
+            };
+        }
+
+                 try {
+             const scrollX = (options && options.x) || 0;
+             const scrollY = (options && options.y) || 500;
+             await session.page.evaluate(`window.scrollBy(${scrollX}, ${scrollY})`);
+
+            return {
+                success: true,
+                data: { scrolled: true },
+                metadata: { x: options?.x || 0, y: options?.y || 500 }
+            };
+
+        } catch (error) {
+            return {
+                success: false,
+                error: `滚动失败: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
     }
 
     /**
      * 输入文本
      */
     async type(selector: string, text: string, options?: Partial<TypeOptions>): Promise<PlaywrightResult> {
-        // 首先获取页面快照来找到元素
-        const snapshotResult = await this.snapshot();
-        if (!snapshotResult.success) {
-            return snapshotResult;
-        }
-
-        const elementRef = this.findElementInSnapshot(selector, snapshotResult.data);
-        if (!elementRef) {
+        const session = this.getBrowserSession();
+        if (!session || !session.page) {
             return {
                 success: false,
-                error: `未找到选择器对应的元素: ${selector}`
+                error: '没有活动的浏览器会话'
             };
         }
 
-        return this.callTool('mcp_playwright_browser_type', {
-            element: selector,
-            ref: elementRef,
-            text: text,
-            slowly: options?.delay ? true : false
-        });
-    }
-
-    /**
-     * 模拟Playwright MCP调用（临时实现）
-     */
-    private async mockPlaywrightCall(toolName: string, args: any): Promise<PlaywrightResult> {
-        await new Promise(resolve => setTimeout(resolve, 200 + Math.random() * 300));
-
-        switch (toolName) {
-            case 'mcp_playwright_browser_navigate':
-                return {
-                    success: true,
-                    data: { navigated: true, url: args.url },
-                    metadata: { loadTime: 1500 }
-                };
-
-            case 'mcp_playwright_browser_snapshot':
-                return {
-                    success: true,
-                    data: this.generateMockWechatHtml(args.url || 'https://mp.weixin.qq.com/s/sample'),
-                    metadata: { contentLength: 15000 }
-                };
-
-            case 'mcp_playwright_browser_wait_for':
-                return {
-                    success: true,
-                    data: { waited: true, time: args.time },
-                    metadata: { waitTime: args.time * 1000 }
-                };
-
-            case 'mcp_playwright_browser_click':
-                return {
-                    success: true,
-                    data: { clicked: true, element: args.element },
-                    metadata: { clickTime: Date.now() }
-                };
-
-            case 'mcp_playwright_browser_take_screenshot':
-                return {
-                    success: true,
-                    data: { screenshot: 'base64_screenshot_data', filename: args.filename },
-                    metadata: { size: { width: 1920, height: 1080 } }
-                };
-
-            default:
-                return {
-                    success: false,
-                    error: `不支持的 Playwright MCP 工具: ${toolName}`
-                };
-        }
-    }
-
-    /**
-     * 生成模拟微信文章HTML
-     */
-    private generateMockWechatHtml(url: string): string {
-        return `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>微信文章示例</title>
-</head>
-<body>
-    <div class="rich_media_content">
-        <h1 id="activity-name">这是一篇示例微信公众号文章</h1>
-        <div class="rich_media_meta_text">
-            <span class="account_nickname_inner">示例公众号</span>
-            <span id="publish_time">2024-01-15</span>
-        </div>
-        <div id="js_content">
-            <p>这是文章的第一段内容，展示了微信公众号的基本格式...</p>
-            <p>这是文章的第二段内容，包含了一些示例文本...</p>
-            <img data-src="https://example.com/image1.jpg" alt="示例图片1" />
-            <p>这是文章的第三段内容...</p>
-            <div class="rich_media_js" style="display: block;">
-                <span>展开全文</span>
-            </div>
-            <div class="rich_media_content_hidden" style="display: none;">
-                <p>这是展开后的隐藏内容，展示了完整的文章...</p>
-                <img data-src="https://example.com/image2.jpg" alt="示例图片2" />
-                <p>文章结束部分...</p>
-            </div>
-        </div>
-    </div>
-</body>
-</html>`;
-    }
-
-    /**
-     * 在快照中查找元素引用
-     */
-    private findElementInSnapshot(selector: string, snapshotData: any): string | null {
         try {
-            // 这里需要解析snapshot返回的数据结构
-            // 通常snapshot会返回页面的可访问性树或元素列表
-            if (typeof snapshotData === 'string') {
-                // 如果是HTML字符串，查找包含选择器相关信息的部分
-                if (snapshotData.includes(selector)) {
-                    // 返回一个简单的引用，实际实现可能需要更复杂的解析
-                    return `element_${Math.random().toString(36).substr(2, 9)}`;
-                }
-            } else if (snapshotData && snapshotData.elements) {
-                // 如果返回的是结构化数据
-                for (const element of snapshotData.elements) {
-                    if (element.selector === selector || element.text?.includes(selector)) {
-                        return element.ref || element.id;
-                    }
-                }
-            }
-            
-            // 默认返回一个生成的引用
-            return `ref_${Date.now()}`;
+            await session.page.fill(selector, text);
+
+            return {
+                success: true,
+                data: { typed: true, text },
+                metadata: { selector, timestamp: Date.now() }
+            };
+
         } catch (error) {
-            this.logger.warn('解析快照数据时出错', error);
-            return `fallback_${Date.now()}`;
+            return {
+                success: false,
+                error: `输入文本失败: ${error instanceof Error ? error.message : String(error)}`
+            };
         }
     }
 
@@ -324,29 +513,81 @@ export class PlaywrightMCPClient {
      * 刷新页面
      */
     async reload(): Promise<PlaywrightResult> {
-        return {
-            success: true,
-            data: { reloaded: true },
-            metadata: { timestamp: Date.now() }
-        };
+        const session = this.getBrowserSession();
+        if (!session || !session.page) {
+            return {
+                success: false,
+                error: '没有活动的浏览器会话'
+            };
+        }
+
+        try {
+            await session.page.reload();
+            return {
+                success: true,
+                data: { reloaded: true },
+                metadata: { timestamp: Date.now() }
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: `刷新失败: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
     }
 
     /**
      * 后退
      */
     async back(): Promise<PlaywrightResult> {
-        return this.callTool('mcp_playwright_browser_navigate_back', {
-            random_string: 'back'
-        });
+        const session = this.getBrowserSession();
+        if (!session || !session.page) {
+            return {
+                success: false,
+                error: '没有活动的浏览器会话'
+            };
+        }
+
+        try {
+            await session.page.goBack();
+            return {
+                success: true,
+                data: { navigated: 'back' },
+                metadata: { timestamp: Date.now() }
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: `后退失败: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
     }
 
     /**
      * 前进
      */
     async forward(): Promise<PlaywrightResult> {
-        return this.callTool('mcp_playwright_browser_navigate_forward', {
-            random_string: 'forward'
-        });
+        const session = this.getBrowserSession();
+        if (!session || !session.page) {
+            return {
+                success: false,
+                error: '没有活动的浏览器会话'
+            };
+        }
+
+        try {
+            await session.page.goForward();
+            return {
+                success: true,
+                data: { navigated: 'forward' },
+                metadata: { timestamp: Date.now() }
+            };
+        } catch (error) {
+            return {
+                success: false,
+                error: `前进失败: ${error instanceof Error ? error.message : String(error)}`
+            };
+        }
     }
 
     /**
@@ -354,44 +595,11 @@ export class PlaywrightMCPClient {
      */
     async ping(): Promise<PlaywrightResult> {
         this.ensureConnected();
-        try {
-            // 调用一个简单的工具来测试连接
-            const result = await this.callTool('mcp_playwright_browser_snapshot', {
-                random_string: 'ping'
-            });
-            return {
-                success: result.success,
-                data: { ping: 'pong', timestamp: Date.now() },
-                metadata: result.metadata
-            };
-        } catch (error) {
-            return {
-                success: false,
-                error: error instanceof Error ? error.message : String(error)
-            };
-        }
-    }
-
-    /**
-     * 清理资源
-     */
-    private async cleanup(): Promise<void> {
-        try {
-            if (this.client) {
-                await this.client.close();
-                this.client = null;
-            }
-            if (this.transport) {
-                await this.transport.close();
-                this.transport = null;
-            }
-            if (this.playwrightProcess) {
-                this.playwrightProcess.kill();
-                this.playwrightProcess = null;
-            }
-        } catch (error) {
-            this.logger.warn('清理资源时出错', error);
-        }
+        return {
+            success: true,
+            data: { ping: 'pong', timestamp: Date.now() },
+            metadata: { connected: this.isConnected }
+        };
     }
 
     /**
@@ -399,7 +607,20 @@ export class PlaywrightMCPClient {
      */
     async close(): Promise<void> {
         this.logger.info('关闭 Playwright MCP 客户端');
+        
+        // 清理浏览器会话
+        const session = this.getBrowserSession();
+        if (session) {
+            try {
+                if (session.page) await session.page.close();
+                if (session.context) await session.context.close(); 
+                if (session.browser) await session.browser.close();
+            } catch (error) {
+                this.logger.warn('清理浏览器会话时出错', error);
+            }
+            delete (global as any)._crawlMCPBrowserSession;
+        }
+        
         this.isConnected = false;
-        await this.cleanup();
     }
 } 
