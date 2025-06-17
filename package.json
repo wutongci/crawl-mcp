@@ -1,6 +1,6 @@
 {
   "name": "crawl-mcp-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "微信公众号文章抓取 MCP 服务器 - 通过编排调用 microsoft/playwright-mcp 实现智能抓取",
   "main": "dist/index.js",
   "bin": {
