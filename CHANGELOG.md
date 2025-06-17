@@ -52,5 +52,67 @@ npx crawl-mcp-server
 - [Troubleshooting Guide](docs/TROUBLESHOOTING.md)
 - [NPM Publishing Guide](docs/NPM_PUBLISHING_GUIDE.md)
 
+## [1.1.0] - 2024-12-19
+
+### 🎉 重大功能升级
+
+#### ✨ 新增功能
+- **真正的图片下载功能**：不再只是指令生成器，现在可以实际下载微信公众号文章中的图片
+- **自动模式**：新增 `mode: "auto"` 参数，支持直接处理 HTML 内容并自动下载图片
+- **智能图片处理**：
+  - 自动识别微信图片域名（mmbiz.qpic.cn, mmbiz.qlogo.cn）
+  - 正确处理微信特有的图片格式参数（wx_fmt）
+  - 自动添加必需的 HTTP Headers（Referer, User-Agent）
+  - 并发下载控制（同时下载3张图片）
+  - 智能重试机制（失败自动重试3次）
+  - 文件大小限制和超时控制
+- **完整的文件管理**：
+  - 自动创建合理的目录结构
+  - 智能文件命名（UUID + 扩展名）
+  - 自动更新 Markdown 中的图片引用为本地路径
+- **详细的处理反馈**：
+  - 实时下载进度显示
+  - 详细的成功/失败统计
+  - 完整的错误信息和建议
+
+#### 🔧 改进功能
+- **增强的工具参数**：
+  - 新增 `mode` 参数：支持 "instruction" 和 "auto" 两种模式
+  - 新增 `html_content` 参数：用于传入页面 HTML 内容
+  - 新增 `output_dir` 参数：自定义输出目录
+- **优化的指令模式**：
+  - 更详细的操作步骤说明
+  - 包含自动模式的使用指导
+  - 提供具体的代码示例和配置参数
+- **更好的错误处理**：
+  - 完善的参数验证
+  - 清晰的错误信息
+  - 详细的故障排除建议
+
+#### 🏗️ 技术改进
+- 使用 Node.js 18+ 内置的 fetch API
+- 完整的 TypeScript 类型定义
+- 模块化的代码架构（ImageDownloader, ArticleProcessor）
+- 完善的单元测试覆盖
+
+### 📦 依赖更新
+- 保持所有依赖为最新稳定版本
+- 优化了包大小和加载性能
+
+### 🐛 Bug 修复
+- 修复了图片 URL 提取的正则表达式
+- 改进了文件路径处理的跨平台兼容性
+- 优化了内存使用和性能
+
+---
+
+## [1.0.7] - 2024-12-18
+
+### 初始版本
+- 基础的微信文章抓取功能
+- 指令模式操作
+- 基本的内容提取
+- Playwright 集成支持
+
 [Unreleased]: https://github.com/yourusername/crawl-mcp-server/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/yourusername/crawl-mcp-server/releases/tag/v1.0.0 

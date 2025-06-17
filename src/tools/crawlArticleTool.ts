@@ -1,19 +1,32 @@
 import { z } from 'zod';
 import { MCPTool } from '../types';
 import { CallToolRequest, CallToolResult, TextContent } from '@modelcontextprotocol/sdk/types.js';
+import { ArticleProcessor, ArticleData, ProcessingOptions } from '../processors/ArticleProcessor';
+import * as path from 'path';
+import * as fs from 'fs-extra';
 
 /**
  * 单篇微信文章抓取工具定义
  */
 export const crawlArticleTool: MCPTool = {
     name: 'crawl_wechat_article',
-    description: '🕷️ [微信文章抓取器] 智能抓取单篇微信公众号文章 - 自动处理页面导航、内容展开、图片下载，输出标准Markdown格式。支持反爬虫检测和智能重试机制。',
+    description: '🕷️ [微信文章抓取器] 智能抓取单篇微信公众号文章 - 支持指令模式和自动模式。指令模式返回操作步骤，自动模式可直接处理HTML内容并下载图片。',
     inputSchema: {
         type: 'object',
         properties: {
             url: {
                 type: 'string',
                 description: '微信公众号文章完整URL，支持mp.weixin.qq.com格式'
+            },
+            mode: {
+                type: 'string',
+                enum: ['instruction', 'auto'],
+                default: 'instruction',
+                description: '运行模式：instruction返回操作指令，auto直接处理（需要html_content参数）'
+            },
+            html_content: {
+                type: 'string',
+                description: '页面HTML内容（auto模式必需）'
             },
             output_format: {
                 type: 'string',
@@ -41,6 +54,11 @@ export const crawlArticleTool: MCPTool = {
                 type: 'integer',
                 default: 30000,
                 description: '单步操作超时时间（毫秒，范围5000-120000）'
+            },
+            output_dir: {
+                type: 'string',
+                default: './crawled_articles',
+                description: '输出目录路径'
             }
         },
         required: ['url']
@@ -180,17 +198,29 @@ export function createErrorResult(
 
 /**
  * 抓取单篇微信文章工具
- * 这个工具会返回操作指令，让Cursor的Agent调用playwright-mcp进行实际抓取
+ * 提供两种模式：
+ * 1. 指令模式：返回详细的操作指令，让Agent手动执行
+ * 2. 自动模式：如果有页面HTML内容，自动执行抓取和图片下载
  */
 export async function crawlWechatArticle(request: CallToolRequest): Promise<CallToolResult> {
     try {
-        const { url, clean_content = true, save_images = true, output_format = 'markdown', strategy = 'basic', timeout = 30000 } = request.params as any;
+        const { 
+            url, 
+            clean_content = true, 
+            save_images = true, 
+            output_format = 'markdown', 
+            strategy = 'basic', 
+            timeout = 30000, 
+            mode = 'instruction',
+            html_content = null,
+            output_dir = './crawled_articles'
+        } = request.params as any;
 
         if (!url) {
             return {
                 content: [{
                     type: "text",
-                    text: "错误：缺少必需的参数 'url'"
+                    text: "❌ 错误：缺少必需的参数 'url'"
                 }],
                 isError: true
             };
@@ -201,92 +231,72 @@ export async function crawlWechatArticle(request: CallToolRequest): Promise<Call
             return {
                 content: [{
                     type: "text", 
-                    text: "错误：URL必须是微信公众号文章链接（包含mp.weixin.qq.com）"
+                    text: "❌ 错误：URL必须是微信公众号文章链接（包含mp.weixin.qq.com）"
                 }],
                 isError: true
             };
         }
 
-        // 返回操作指令，让Cursor Agent去执行
-        const instructions = `
-我需要抓取这篇微信文章的内容。请按照以下步骤操作：
+        // 如果提供了html_content，尝试自动处理
+        if (mode === 'auto' && html_content) {
+            return await processArticleAutomatically(url, html_content, {
+                save_images,
+                clean_content,
+                output_format,
+                strategy,
+                timeout,
+                output_dir
+            });
+        }
 
-## 第一步：打开浏览器并导航
-请使用 mcp_playwright_browser_navigate 工具导航到：
-${url}
+        // 如果是指令模式，返回详细的操作指令
+        if (mode === 'instruction') {
+            const instructions = generateInstructions(url, { save_images, clean_content, output_format, strategy, timeout });
+            return {
+                content: [{
+                    type: "text",
+                    text: instructions
+                }]
+            };
+        }
 
-## 第二步：等待页面加载
-使用 mcp_playwright_browser_wait_for 工具等待3秒，确保页面完全加载。
-
-## 第三步：尝试展开全文
-使用 mcp_playwright_browser_snapshot 获取页面快照，然后查找"展开全文"或类似的按钮。
-如果找到，使用 mcp_playwright_browser_click 点击展开。
-
-## 第四步：获取页面内容
-使用 mcp_playwright_browser_snapshot 获取完整的页面HTML内容。
-
-## 第五步：提取文章信息
-从HTML中提取以下信息：
-- 文章标题（通常在 #activity-name 或 .rich_media_title 中）
-- 发布时间（通常在 #publish_time 中） 
-- 作者/公众号（通常在 .account_nickname_inner 中）
-- 文章正文（通常在 #js_content 或 .rich_media_content 中）
-- 图片链接（data-src 属性）
-
-## 第六步：处理图片资源${save_images ? ' (已启用图片下载)' : ' (跳过图片下载)'}
-${save_images ? `
-**重要：需要下载所有图片并创建本地引用**
-
-1. **创建文件夹结构**：
-   - 创建文章文件夹（以文章标题命名，去除特殊字符）
-   - 在文章文件夹内创建 images 子文件夹
-
-2. **识别和下载图片**：
-   - 查找所有 <img> 标签，特别关注：
-     * src 属性（如：https://mmbiz.qpic.cn/sz_mmbiz_jpg/...）
-     * data-src 属性（微信懒加载图片）
-     * class 包含 "wx_follow_avatar_pic" 或其他微信图片类名
-   - 对每个图片URL，使用 mcp_playwright_browser_navigate 访问图片链接
-   - 使用 mcp_playwright_browser_take_screenshot 或保存方式下载图片
-   - 图片命名：image_001.jpg, image_002.png 等（从URL提取格式：wx_fmt=jpeg）
-
-3. **更新markdown中的图片引用**：
-   - 将原始图片URL替换为本地路径：![图片描述](./images/image_001.jpg)
-   - 确保所有图片都能在本地正常显示
-` : '跳过图片下载（save_images=false）'}
-
-## 第七步：生成最终文件
-创建包含以下内容的markdown文件：
-\`\`\`markdown
-# [文章标题]
-
-**作者：** [公众号名称]  
-**发布时间：** [发布时间]  
-**原文链接：** ${url}
-
----
-
-[文章正文内容${save_images ? '，图片使用本地路径引用' : ''}]
-
----
-
-*抓取时间：[当前时间]*
-\`\`\`
-
-## 处理配置：
-- 清理内容：${clean_content ? '是' : '否'}
-- 保存图片：${save_images ? '是' : '否'}  
-- 输出格式：${output_format}
-- 抓取策略：${strategy}
-- 超时时间：${timeout}ms
-
-请按顺序执行这些步骤，并在每一步完成后告诉我结果。${save_images ? '特别注意图片的下载和本地化处理！' : ''}
-`;
-
+        // 如果是自动模式但没有HTML内容，提供使用指南
         return {
             content: [{
                 type: "text",
-                text: instructions
+                text: `🤖 **自动模式使用指南**
+
+要使用自动模式，请先通过以下步骤获取页面内容：
+
+### 步骤1：获取页面HTML
+\`\`\`bash
+# 使用 playwright 获取页面内容
+mcp_playwright_browser_navigate: { "url": "${url}" }
+mcp_playwright_browser_wait_for: { "time": 3000 }
+mcp_playwright_browser_snapshot: {}
+\`\`\`
+
+### 步骤2：调用自动处理
+获取到HTML内容后，再次调用此工具并传入以下参数：
+\`\`\`json
+{
+  "url": "${url}",
+  "mode": "auto",
+  "html_content": "[页面HTML内容]",
+  "save_images": ${save_images},
+  "clean_content": ${clean_content},
+  "output_format": "${output_format}",
+  "output_dir": "${output_dir}"
+}
+\`\`\`
+
+### 当前配置
+- 🖼️ 图片下载: ${save_images ? '✅ 启用' : '❌ 禁用'}
+- 🧹 内容清理: ${clean_content ? '✅ 启用' : '❌ 禁用'}
+- 📄 输出格式: ${output_format}
+- 📁 输出目录: ${output_dir}
+
+**提示**: 如果你想要详细的手动操作步骤，请使用 \`mode: "instruction"\``
             }]
         };
 
@@ -294,9 +304,293 @@ ${save_images ? `
         return {
             content: [{
                 type: "text",
-                text: `抓取工具出错：${error instanceof Error ? error.message : String(error)}`
+                text: `❌ 抓取工具出错：${error instanceof Error ? error.message : String(error)}`
             }],
             isError: true
         };
     }
+}
+
+/**
+ * 自动处理文章（包括图片下载）
+ */
+async function processArticleAutomatically(
+    url: string,
+    htmlContent: string,
+    options: {
+        save_images: boolean;
+        clean_content: boolean;
+        output_format: string;
+        strategy: string;
+        timeout: number;
+        output_dir: string;
+    }
+): Promise<CallToolResult> {
+    try {
+        const processor = new ArticleProcessor();
+        
+        // 从HTML中提取文章数据
+        const articleData: ArticleData = processor.extractArticleDataFromSnapshot(htmlContent);
+        articleData.url = url;
+        
+        // 准备处理选项
+        const processingOptions: ProcessingOptions = {
+            output_dir: options.output_dir,
+            save_images: options.save_images,
+            clean_content: options.clean_content,
+            create_markdown: options.output_format === 'markdown',
+            create_json: options.output_format === 'json'
+        };
+
+        // 处理参数
+        const crawlParams: CrawlArticleParams = {
+            url,
+            save_images: options.save_images,
+            clean_content: options.clean_content,
+            output_format: options.output_format as 'markdown' | 'json',
+            strategy: options.strategy as 'basic' | 'conservative' | 'fast',
+            timeout: options.timeout
+        };
+
+        // 执行完整的文章处理
+        const result = await processor.processArticle(articleData, crawlParams, processingOptions);
+
+        if (result.success) {
+            const successMessage = `✅ **文章抓取成功！**
+
+📄 **文章信息**
+- 标题: ${result.title}
+- 作者: ${result.author}
+- 发布时间: ${result.publish_time}
+- 字数: ${result.metadata?.word_count || 0}
+
+🖼️ **图片处理**
+- 发现图片: ${result.metadata?.image_count || 0} 张
+- 下载成功: ${result.images.filter(img => img.local_path).length} 张
+- 下载失败: ${result.images.length - result.images.filter(img => img.local_path).length} 张
+
+📁 **输出文件**
+- 保存位置: ${result.file_path}
+- 处理时间: ${result.duration}ms
+
+${result.images.length > 0 ? `
+🔗 **图片清单**
+${result.images.map((img, idx) => 
+    `${idx + 1}. ${img.filename} (${(img.size / 1024).toFixed(1)}KB) ${img.local_path ? '✅' : '❌'}`
+).join('\n')}
+` : ''}
+
+${result.warnings && result.warnings.length > 0 ? `
+⚠️ **警告信息**
+${result.warnings.join('\n')}
+` : ''}
+
+🎉 处理完成！你现在可以在 "${result.file_path}" 查看抓取的文章内容。`;
+
+            return {
+                content: [{
+                    type: "text",
+                    text: successMessage
+                }]
+            };
+        } else {
+            return {
+                content: [{
+                    type: "text",
+                    text: `❌ **文章处理失败**
+
+错误信息: ${result.error}
+
+**已完成步骤**: ${result.steps_completed}/${result.total_steps}
+
+请检查：
+1. URL是否有效
+2. 页面HTML是否完整
+3. 网络连接是否正常
+4. 输出目录是否有写入权限
+
+建议使用指令模式获取详细的手动操作步骤。`
+                }],
+                isError: true
+            };
+        }
+
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        return {
+            content: [{
+                type: "text",
+                text: `❌ **自动处理过程出错**
+
+错误信息: ${errorMsg}
+
+建议：
+1. 检查HTML内容是否完整
+2. 确保有足够的磁盘空间
+3. 检查网络连接
+4. 尝试使用指令模式进行手动操作
+
+如需详细操作步骤，请使用 \`mode: "instruction"\``
+            }],
+            isError: true
+        };
+    }
+}
+
+/**
+ * 生成操作指令
+ */
+function generateInstructions(url: string, options: {
+    save_images: boolean;
+    clean_content: boolean;
+    output_format: string;
+    strategy: string;
+    timeout: number;
+}): string {
+    return `🕷️ **微信文章抓取指令** - 请按以下步骤操作：
+
+## 🎯 抓取目标
+**URL**: ${url}
+**配置**: 图片下载=${options.save_images ? '✅' : '❌'}, 内容清理=${options.clean_content ? '✅' : '❌'}, 格式=${options.output_format}
+
+## 📋 执行步骤
+
+### 第一步：打开浏览器并导航
+使用 \`mcp_playwright_browser_navigate\` 导航到：
+\`\`\`
+${url}
+\`\`\`
+
+### 第二步：等待页面完全加载
+使用 \`mcp_playwright_browser_wait_for\` 等待 3 秒，确保页面加载完成：
+\`\`\`json
+{ "time": 3000 }
+\`\`\`
+
+### 第三步：检查并展开全文
+1. 使用 \`mcp_playwright_browser_snapshot\` 获取页面快照
+2. 查找"展开全文"、"阅读全文"等按钮
+3. 如果找到，使用 \`mcp_playwright_browser_click\` 点击展开
+
+### 第四步：获取完整页面内容
+再次使用 \`mcp_playwright_browser_snapshot\` 获取完整的页面HTML内容
+
+### 第五步：提取核心信息
+从HTML中提取：
+- **标题**: \`#activity-name\` 或 \`.rich_media_title\`
+- **作者**: \`.account_nickname_inner\` 或 \`#js_name\`  
+- **时间**: \`#publish_time\` 或 \`.publish_time\`
+- **正文**: \`#js_content\` 或 \`.rich_media_content\`
+- **图片**: 所有 \`<img>\` 标签的 \`src\` 和 \`data-src\` 属性
+
+${options.save_images ? `
+### 🖼️ 第六步：图片处理（已启用）
+
+**重要提示**：crawl-mcp 内置了完整的图片下载功能
+
+#### 6.1 自动模式（推荐）
+获取到页面HTML后，使用自动模式：
+\`\`\`json
+{
+  "url": "${url}",
+  "mode": "auto", 
+  "html_content": "[第四步获取的HTML内容]",
+  "save_images": true,
+  "clean_content": ${options.clean_content},
+  "output_format": "${options.output_format}",
+  "output_dir": "./crawled_articles"
+}
+\`\`\`
+
+#### 6.2 手动模式（备选方案）
+如果自动模式失败，可手动执行：
+
+**创建目录结构**
+\`\`\`bash
+mkdir -p "文章标题/images"
+\`\`\`
+
+**使用内置图片下载器**
+\`\`\`javascript
+const { ImageDownloader } = require('./crawl-mcp/src/utils/ImageDownloader');
+const downloader = new ImageDownloader();
+
+// 从HTML提取图片
+const imageUrls = downloader.extractImageUrlsFromHtml(htmlContent);
+
+// 批量下载
+const results = await downloader.downloadImages(imageUrls, {
+  output_dir: './文章标题/images',
+  max_file_size: 10 * 1024 * 1024, // 10MB
+  timeout: 15000,
+  retries: 3
+});
+\`\`\`
+
+**微信图片特殊处理**
+- 验证域名：\`mmbiz.qpic.cn\`, \`mmbiz.qlogo.cn\`
+- 添加正确的 Headers：
+  - \`Referer: https://mp.weixin.qq.com/\`
+  - \`User-Agent: Mozilla/5.0...\`
+- 处理格式参数：\`wx_fmt=jpeg|png|gif\`
+` : `
+### 第六步：跳过图片处理
+图片下载已禁用，将保留原始URL引用
+`}
+
+### 第七步：生成最终文件
+创建包含以下内容的markdown文件：
+
+\`\`\`markdown
+# [文章标题]
+
+**作者**: [公众号名称]  
+**发布时间**: [发布时间]  
+**原文链接**: ${url}
+
+${options.save_images ? '**图片统计**: 共 X 张图片，成功下载 Y 张' : ''}
+
+---
+
+[文章正文内容]
+
+---
+
+*本文由 crawl-mcp 自动抓取于 [当前时间]*
+\`\`\`
+
+## ⚙️ 处理配置
+- **清理内容**: ${options.clean_content ? '✅ 启用（移除广告推广）' : '❌ 关闭'}
+- **保存图片**: ${options.save_images ? '✅ 启用（下载到本地）' : '❌ 关闭'}  
+- **输出格式**: ${options.output_format}
+- **抓取策略**: ${options.strategy}
+- **超时时间**: ${options.timeout}ms
+
+## 💡 使用提示
+1. **图片下载**：${options.save_images ? '必须手动执行上述第6步的图片下载流程' : '已跳过，节省时间'}
+2. **内容清理**：${options.clean_content ? '手动移除广告和推广内容' : '保留原始内容'}
+3. **文件保存**：建议保存到 \`./crawled_articles/\` 目录下
+
+${options.save_images ? `
+## 🔧 **关键代码示例**
+
+### 图片下载脚本
+\`\`\`bash
+# 创建目录
+mkdir -p "文章标题/images"
+
+# 下载图片（示例）
+curl -H "Referer: https://mp.weixin.qq.com/" \\
+     -H "User-Agent: Mozilla/5.0..." \\
+     "https://mmbiz.qpic.cn/..." \\
+     -o "images/image_001.jpg"
+\`\`\`
+
+### URL替换正则
+\`\`\`javascript
+content.replace(/https:\\/\\/mmbiz\\.qpic\\.cn\\/[^\\s)]+/g, './images/image_XXX.jpg')
+\`\`\`
+` : ''}
+
+请按步骤执行，${options.save_images ? '特别注意图片下载和本地化处理！' : ''}每完成一步请告知结果。`;
 } 
