@@ -1,6 +1,6 @@
 {
   "name": "crawl-mcp-server",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "description": "微信公众号文章抓取 MCP 服务器 - 支持自动图片下载、内容清理、智能抓取，可生成完整的本地化Markdown文档",
   "main": "dist/index.js",
   "bin": {
@@ -25,7 +25,8 @@
     "fs-extra": "^11.1.0",
     "mime-types": "^2.1.35",
     "uuid": "^9.0.0",
-    "zod": "^3.25.62"
+    "zod": "^3.25.62",
+    "zod-to-json-schema": "^3.24.5"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.1",
