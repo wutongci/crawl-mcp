@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { MCPTool } from '../types';
 import { CrawlBatchProgress } from './crawlBatchTool';
 import { Logger } from '../utils/Logger.js';
-import { CallToolResult, TextContent } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequest, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 /**
  * 抓取状态查询工具定义
@@ -117,146 +117,72 @@ export interface CrawlStatusResult {
 }
 
 /**
- * 服务器状态检查工具
- * 提供服务器运行状态、性能指标和健康检查信息
+ * 获取服务器状态工具
  */
-export async function crawlServerStatus(request: any): Promise<CallToolResult> {
-    const logger = new Logger('CrawlStatusTool');
-    
+export async function crawlServerStatus(request: CallToolRequest): Promise<CallToolResult> {
     try {
-        logger.debug('执行服务器状态检查', request);
-        
-        // 提取参数
-        const includeDetails = request?.params?.include_details || 
-                              request?.params?.arguments?.include_details || 
-                              false;
-        
-        // 获取系统信息
-        const now = Date.now();
-        const memUsage = process.memoryUsage();
-        const uptime = process.uptime();
-        
-        // 基本状态信息
-        const basicStatus = {
+        const status = {
             server: {
                 name: 'crawl-mcp-server',
                 version: '1.1.6',
                 status: 'running',
                 pid: process.pid,
-                uptime_seconds: Math.round(uptime),
-                uptime_formatted: formatUptime(uptime)
-            },
-            memory: {
-                heap_used_mb: Math.round(memUsage.heapUsed / 1024 / 1024),
-                heap_total_mb: Math.round(memUsage.heapTotal / 1024 / 1024),
-                rss_mb: Math.round(memUsage.rss / 1024 / 1024),
-                external_mb: Math.round(memUsage.external / 1024 / 1024)
-            },
-            environment: {
                 node_version: process.version,
                 platform: process.platform,
-                arch: process.arch,
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+                arch: process.arch
             },
-            timestamp: new Date().toISOString()
+            memory: {
+                used_mb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+                total_mb: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+                rss_mb: Math.round(process.memoryUsage().rss / 1024 / 1024)
+            },
+            environment: {
+                node_env: process.env.NODE_ENV || 'production',
+                debug_mode: process.env.MCP_DEBUG === 'true'
+            }
         };
-        
-        // 健康检查
-        const healthCheck = performHealthCheck(memUsage, uptime);
-        
-        let responseText = `📊 **Crawl MCP Server 状态报告**\n\n`;
-        responseText += `🟢 **服务器状态**: ${basicStatus.server.status}\n`;
-        responseText += `📦 **版本**: ${basicStatus.server.version}\n`;
-        responseText += `🆔 **进程ID**: ${basicStatus.server.pid}\n`;
-        responseText += `⏱️ **运行时间**: ${basicStatus.server.uptime_formatted}\n\n`;
-        
-        responseText += `💾 **内存使用**:\n`;
-        responseText += `  - Heap: ${basicStatus.memory.heap_used_mb}MB / ${basicStatus.memory.heap_total_mb}MB\n`;
-        responseText += `  - RSS: ${basicStatus.memory.rss_mb}MB\n`;
-        responseText += `  - External: ${basicStatus.memory.external_mb}MB\n\n`;
-        
-        responseText += `🖥️ **运行环境**:\n`;
-        responseText += `  - Node.js: ${basicStatus.environment.node_version}\n`;
-        responseText += `  - 平台: ${basicStatus.environment.platform} (${basicStatus.environment.arch})\n`;
-        responseText += `  - 时区: ${basicStatus.environment.timezone}\n\n`;
-        
-        responseText += `💚 **健康状态**: ${healthCheck.status}\n`;
-        if (healthCheck.warnings.length > 0) {
-            responseText += `⚠️ **警告**:\n`;
-            healthCheck.warnings.forEach(warning => {
-                responseText += `  - ${warning}\n`;
-            });
-            responseText += '\n';
-        }
-        
-        // 详细信息
-        if (includeDetails) {
-            responseText += `🔍 **详细诊断信息**:\n\n`;
-            
-            // 环境变量
-            const relevantEnvVars = [
-                'MCP_DEBUG', 'MCP_MEMORY_MONITOR', 'NODE_ENV',
-                'CRAWL_LOG_LEVEL', 'CRAWL_OUTPUT_DIR', 'CRAWL_MAX_CONCURRENT'
-            ];
-            
-            responseText += `🔧 **环境配置**:\n`;
-            relevantEnvVars.forEach(envVar => {
-                const value = process.env[envVar];
-                responseText += `  - ${envVar}: ${value || '(未设置)'}\n`;
-            });
-            responseText += '\n';
-            
-            // CPU 信息
-            try {
-                const cpuUsage = process.cpuUsage();
-                responseText += `⚡ **CPU 使用**:\n`;
-                responseText += `  - User: ${Math.round(cpuUsage.user / 1000)}ms\n`;
-                responseText += `  - System: ${Math.round(cpuUsage.system / 1000)}ms\n\n`;
-            } catch (error) {
-                logger.debug('获取CPU信息失败', error);
-            }
-            
-            // 磁盘空间检查
-            try {
-                const outputDir = process.env.CRAWL_OUTPUT_DIR || './crawled_articles';
-                responseText += `💿 **存储信息**:\n`;
-                responseText += `  - 输出目录: ${outputDir}\n`;
-                responseText += `  - 工作目录: ${process.cwd()}\n\n`;
-            } catch (error) {
-                logger.debug('获取磁盘信息失败', error);
-            }
-            
-            // 系统资源限制
-            responseText += `📋 **系统限制**:\n`;
-            try {
-                const nodeOptions = process.env.NODE_OPTIONS || '(默认)';
-                responseText += `  - Node选项: ${nodeOptions}\n`;
-                responseText += `  - 最大内存: ${getMemoryLimit()}MB\n`;
-            } catch (error) {
-                responseText += `  - 无法获取资源限制信息\n`;
-            }
-        }
-        
-        responseText += `\n🕐 **报告时间**: ${basicStatus.timestamp}`;
-        
-        logger.info('服务器状态检查完成');
-        
+
         return {
             content: [{
                 type: 'text',
-                text: responseText
-            } as TextContent]
+                text: `✅ **Crawl MCP Server 状态报告**
+
+🏠 **服务器信息:**
+- 名称: ${status.server.name}
+- 版本: ${status.server.version}
+- 状态: ${status.server.status}
+- 进程ID: ${status.server.pid}
+
+💻 **运行环境:**
+- Node.js: ${status.server.node_version}
+- 平台: ${status.server.platform}
+- 架构: ${status.server.arch}
+
+📊 **内存使用:**
+- 已用: ${status.memory.used_mb}MB
+- 总计: ${status.memory.total_mb}MB  
+- RSS: ${status.memory.rss_mb}MB
+
+⚙️ **配置:**
+- 环境: ${status.environment.node_env}
+- 调试模式: ${status.environment.debug_mode ? '✅ 开启' : '❌ 关闭'}
+
+🔧 **可用功能:**
+- ✅ 微信文章抓取 (crawl_wechat_article)
+- ✅ 服务器状态查询 (crawl_server_status)
+
+📝 **使用说明:**
+使用 crawl_wechat_article 工具抓取微信公众号文章，支持图片下载和Markdown转换。`
+            }]
         };
-        
+
     } catch (error) {
-        logger.error('服务器状态检查失败:', error);
-        
         const errorMessage = error instanceof Error ? error.message : '未知错误';
         return {
             content: [{
                 type: 'text',
-                text: `❌ 服务器状态检查失败: ${errorMessage}`
-            } as TextContent],
+                text: `❌ 获取状态失败: ${errorMessage}`
+            }],
             isError: true
         };
     }

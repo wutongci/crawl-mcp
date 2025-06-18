@@ -197,131 +197,64 @@ export function createErrorResult(
 }
 
 /**
- * 抓取单篇微信文章工具
- * 提供两种模式：
- * 1. 指令模式：返回详细的操作指令，让Agent手动执行
- * 2. 自动模式：如果有页面HTML内容，自动执行抓取和图片下载
+ * 抓取微信公众号文章工具
  */
 export async function crawlWechatArticle(request: CallToolRequest): Promise<CallToolResult> {
     try {
-        // 提取参数
-        let params: any = {};
-        let url: string | undefined;
-        
-        // 从arguments字段获取参数
-        if ((request.params as any)?.arguments) {
-            params = (request.params as any).arguments;
-            url = params.url;
-        } else if (request.params && typeof request.params === 'object') {
-            // 从其他字段获取参数
-            const { name, _meta, ...otherParams } = request.params as any;
-            if (Object.keys(otherParams).length > 0) {
-                params = otherParams;
-                url = params.url;
-            }
-        }
-        
-        const { 
-            clean_content = true, 
-            save_images = true, 
-            output_format = 'markdown', 
-            strategy = 'basic', 
-            timeout = 30000, 
-            mode = 'instruction',
-            html_content = null,
-            output_dir = './crawled_articles'
-        } = params;
+        // 提取URL参数
+        const args = request.params.arguments as { url?: string };
+        const url = args?.url;
 
-        // 验证必需参数
         if (!url) {
             return {
                 content: [{
-                    type: "text",
-                    text: "❌ 错误：缺少必需的参数 'url'"
+                    type: 'text',
+                    text: '❌ 错误：缺少必需的参数 "url"'
                 }],
                 isError: true
             };
         }
 
-        // 验证URL格式
+        // 验证URL
         if (!url.includes('mp.weixin.qq.com')) {
             return {
                 content: [{
-                    type: "text", 
-                    text: "❌ 错误：URL必须是微信公众号文章链接（包含mp.weixin.qq.com）"
+                    type: 'text',
+                    text: '❌ 错误：请提供有效的微信公众号文章URL'
                 }],
                 isError: true
             };
         }
 
-        // 如果提供了html_content，尝试自动处理
-        if (mode === 'auto' && html_content) {
-            return await processArticleAutomatically(url, html_content, {
-                save_images,
-                clean_content,
-                output_format,
-                strategy,
-                timeout,
-                output_dir
-            });
-        }
-
-        // 如果是指令模式，返回详细的操作指令
-        if (mode === 'instruction') {
-            const instructions = generateInstructions(url, { save_images, clean_content, output_format, strategy, timeout });
-            return {
-                content: [{
-                    type: "text",
-                    text: instructions
-                }]
-            };
-        }
-
-        // 如果是自动模式但没有HTML内容，提供使用指南
+        // 返回抓取指令
         return {
             content: [{
-                type: "text",
-                text: `🤖 **自动模式使用指南**
+                type: 'text',
+                text: `🔄 正在准备抓取微信文章...
 
-要使用自动模式，请先通过以下步骤获取页面内容：
+📋 **抓取任务:**
+- URL: ${url}
+- 任务: 微信公众号文章抓取
+- 输出: Markdown格式 + 图片下载
 
-### 步骤1：获取页面HTML
-\`\`\`bash
-# 使用 playwright 获取页面内容
-mcp_playwright_browser_navigate: { "url": "${url}" }
-mcp_playwright_browser_wait_for: { "time": 3000 }
-mcp_playwright_browser_snapshot: {}
-\`\`\`
+🤖 **请使用playwright-mcp执行以下操作:**
 
-### 步骤2：调用自动处理
-获取到HTML内容后，再次调用此工具并传入以下参数：
-\`\`\`json
-{
-  "url": "${url}",
-  "mode": "auto",
-  "html_content": "[页面HTML内容]",
-  "save_images": ${save_images},
-  "clean_content": ${clean_content},
-  "output_format": "${output_format}",
-  "output_dir": "${output_dir}"
-}
-\`\`\`
+1. 打开页面: ${url}
+2. 等待页面加载完成
+3. 提取文章标题、内容、图片
+4. 下载所有图片到本地
+5. 生成Markdown文档
 
-### 当前配置
-- 🖼️ 图片下载: ${save_images ? '✅ 启用' : '❌ 禁用'}
-- 🧹 内容清理: ${clean_content ? '✅ 启用' : '❌ 禁用'}
-- 📄 输出格式: ${output_format}
-- 📁 输出目录: ${output_dir}
-
-**提示**: 如果你想要详细的手动操作步骤，请使用 \`mode: "instruction"\``
+✅ 抓取任务已准备就绪，请agent继续执行`
             }]
         };
 
     } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : '未知错误';
         return {
             content: [{
-                type: "text",
-                text: `❌ 抓取工具出错：${error instanceof Error ? error.message : String(error)}`
+                type: 'text',
+                text: `❌ 工具执行失败: ${errorMessage}`
             }],
             isError: true
         };
