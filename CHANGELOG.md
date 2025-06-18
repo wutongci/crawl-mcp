@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6] - 2024-12-18
+
+### 🔧 **Cursor MCP 兼容性修复**
+
+#### ✅ 专门修复Cursor环境下的连接问题
+- **stdio传输优化**：严格按照[Cursor MCP文档](https://docs.cursor.com/context/model-context-protocol)要求优化
+  - 移除可能干扰stdio通信的复杂心跳机制
+  - 简化日志输出，避免污染MCP协议通信
+  - 优化错误处理，防止自动重启影响Cursor连接管理
+- **连接生命周期管理**：
+  - 让Cursor完全管理MCP服务器生命周期
+  - 移除自动重启逻辑，避免与Cursor冲突
+  - 提高错误阈值，减少不必要的服务器关闭
+- **启动脚本优化**：
+  - 大幅简化启动日志和监控输出
+  - 移除可能干扰stdio的进程管理代码
+  - 优化信号处理，确保优雅关闭
+
+#### 🚀 **配置优化**
+- **推荐配置**：更新`.cursor/mcp_config.json`示例
+  ```json
+  {
+    "mcpServers": {
+      "crawl-mcp": {
+        "command": "npx",
+        "args": ["-y", "crawl-mcp-server@latest"],
+        "env": {
+          "MCP_DEBUG": "false",
+          "CRAWL_LOG_LEVEL": "warn",
+          "CRAWL_OUTPUT_DIR": "./crawled_articles"
+        }
+      }
+    }
+  }
+  ```
+- **环境变量简化**：移除不必要的配置项，减少启动复杂度
+
+#### 🎯 **解决的具体问题**
+- ✅ 修复运行一段时间后MCP连接断开的问题
+- ✅ 修复心跳监控干扰Cursor状态检测的问题
+- ✅ 修复过度日志输出影响stdio通信的问题
+- ✅ 修复自动重启与Cursor连接管理冲突的问题
+- ✅ 优化内存监控频率，减少系统负载
+
+### 📦 **使用建议**
+```bash
+# 推荐使用方式 - 让Cursor管理
+npx crawl-mcp-server@latest
+
+# 或在Cursor配置中使用上述JSON配置
+```
+
+---
+
 ## [1.1.5] - 2024-12-18
 
 ### 🚀 重大稳定性改进 - 参考 Microsoft Playwright-MCP 最佳实践

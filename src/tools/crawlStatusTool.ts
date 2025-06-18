@@ -140,7 +140,7 @@ export async function crawlServerStatus(request: any): Promise<CallToolResult> {
         const basicStatus = {
             server: {
                 name: 'crawl-mcp-server',
-                version: '1.1.5',
+                version: '1.1.6',
                 status: 'running',
                 pid: process.pid,
                 uptime_seconds: Math.round(uptime),
