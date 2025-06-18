@@ -1,6 +1,6 @@
 {
   "name": "crawl-mcp-server",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "微信公众号文章抓取 MCP 服务器 - 支持自动图片下载、内容清理、智能抓取，可生成完整的本地化Markdown文档",
   "main": "dist/index.js",
   "bin": {
