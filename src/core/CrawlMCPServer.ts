@@ -46,7 +46,7 @@ const crawlWechatArticleToolDef = {
                 description: '单步操作超时时间（毫秒，范围5000-120000）'
             }
         },
-        required: ['url']
+        required: []
     }
 };
 
@@ -92,10 +92,19 @@ export class CrawlMCPServer {
         // 处理工具调用
         this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
             this.logger.info(`收到工具调用请求: ${request.params.name}`);
+            this.logger.debug(`请求参数: ${JSON.stringify(request.params, null, 2)}`);
             
             switch (request.params.name) {
                 case 'crawl_wechat_article':
-                    return await crawlWechatArticle(request);
+                    // 重新构造request，确保参数在正确的位置
+                    const modifiedRequest = {
+                        ...request,
+                        params: {
+                            ...request.params,
+                            ...(request.params.arguments || {})
+                        }
+                    };
+                    return await crawlWechatArticle(modifiedRequest);
                     
                 default:
                     throw new Error(`未知的工具: ${request.params.name}`);

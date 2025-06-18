@@ -17,18 +17,18 @@ async function startMCPServer() {
         // 监听进程信号
         process.on('SIGINT', async () => {
             console.error('[关闭] 收到SIGINT信号，正在关闭服务器...');
-            await server.close();
+            await server.stop();
             process.exit(0);
         });
         
         process.on('SIGTERM', async () => {
             console.error('[关闭] 收到SIGTERM信号，正在关闭服务器...');
-            await server.close();
+            await server.stop();
             process.exit(0);
         });
         
         // 启动服务器
-        await server.run();
+        await server.start();
         
     } catch (error) {
         console.error('[错误] MCP服务器启动失败:', error);

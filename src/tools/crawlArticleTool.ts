@@ -60,8 +60,8 @@ export const crawlArticleTool: MCPTool = {
                 default: './crawled_articles',
                 description: '输出目录路径'
             }
-        },
-        required: ['url']
+            },
+    required: []
     },
     zodSchema: z.object({
         url: z.string().url('必须提供有效的微信文章URL').refine(
@@ -204,8 +204,24 @@ export function createErrorResult(
  */
 export async function crawlWechatArticle(request: CallToolRequest): Promise<CallToolResult> {
     try {
+        // 提取参数
+        let params: any = {};
+        let url: string | undefined;
+        
+        // 从arguments字段获取参数
+        if ((request.params as any)?.arguments) {
+            params = (request.params as any).arguments;
+            url = params.url;
+        } else if (request.params && typeof request.params === 'object') {
+            // 从其他字段获取参数
+            const { name, _meta, ...otherParams } = request.params as any;
+            if (Object.keys(otherParams).length > 0) {
+                params = otherParams;
+                url = params.url;
+            }
+        }
+        
         const { 
-            url, 
             clean_content = true, 
             save_images = true, 
             output_format = 'markdown', 
@@ -214,8 +230,9 @@ export async function crawlWechatArticle(request: CallToolRequest): Promise<Call
             mode = 'instruction',
             html_content = null,
             output_dir = './crawled_articles'
-        } = request.params as any;
+        } = params;
 
+        // 验证必需参数
         if (!url) {
             return {
                 content: [{
