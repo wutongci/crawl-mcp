@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.3] - 2024-12-18
+
+### 🐛 Critical Bug Fixes
+
+#### ✅ 修复的关键问题
+- **MCP参数传递问题**：完全修复了 "缺少必需的参数'url'" 错误
+  - 改进了参数提取逻辑，正确处理 MCP 的 `arguments` 字段
+  - 兼容多种参数传递格式（arguments、直接参数等）
+  - 确保参数验证逻辑正常工作
+- **npm包执行权限问题**：解决了 `sh: crawl-mcp-server: command not found` 错误
+  - 更新构建脚本自动为 `dist/index.js` 添加执行权限
+  - 确保 `npx crawl-mcp-server` 能正常运行
+  - 修复了 shebang 权限问题
+- **调试模式卡死问题**：移除了临时调试代码，恢复正常功能
+  - 清理了所有调试输出和临时返回
+  - 恢复了完整的工具功能（指令模式、自动模式）
+  - 修复了工具一直返回调试信息的问题
+
+#### 🔧 技术改进
+- **构建流程优化**：
+  - 修改 `package.json` 的 build 脚本：`"build": "tsc && chmod +x dist/index.js"`
+  - 确保每次构建都自动设置正确的文件权限
+- **参数处理增强**：
+  - 更智能的参数提取逻辑
+  - 更好的错误处理和用户反馈
+  - 保持向后兼容性
+- **发布流程完善**：
+  - 自动化的构建和发布流程
+  - 完整的版本标签和代码同步
+
+#### 🚀 用户体验
+- **立即可用**：
+  - `npx crawl-mcp-server@latest` 现在能正常启动
+  - Cursor MCP 集成恢复正常工作
+  - 所有工具功能完全可用
+- **稳定性提升**：
+  - 消除了随机的参数传递失败
+  - 修复了工具时有时无的问题
+  - 确保一致的用户体验
+
+### 📦 安装和使用
+```bash
+# 直接运行最新版本
+npx crawl-mcp-server@latest
+
+# 或在 Cursor MCP 配置中使用
+{
+  "mcpServers": {
+    "crawl-mcp": {
+      "command": "npx",
+      "args": ["-y", "crawl-mcp-server@latest"]
+    }
+  }
+}
+```
+
+### ⚡ 立即测试
+现在可以正常使用微信文章抓取功能：
+```
+https://mp.weixin.qq.com/s/任意文章链接
+```
+
+---
+
+## [1.1.2] - 2024-12-18
+
+### 🔧 Build Fixes
+- 修复 npm 包执行权限问题
+- 更新构建脚本自动设置执行权限
+
+---
+
+## [1.1.1] - 2024-12-18
+
+### 🐛 Parameter Fixes  
+- 修复 MCP 参数传递逻辑
+- 改进错误处理机制
+
+---
+
 ## [1.0.0] - 2024-12-26
 
 ### Added
